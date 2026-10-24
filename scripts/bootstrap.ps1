@@ -9,8 +9,9 @@
 # install.ps1 only as the fallback when winget cannot install it. Fetches no binaries itself. Idempotent: every step checks before it acts.
 #
 # Usage, in PowerShell:
-#   irm https://raw.githubusercontent.com/ContinentalWorks/supersuit-docs/main/scripts/bootstrap.ps1 -OutFile $HOME\supersuit-bootstrap.ps1
-#   powershell -ExecutionPolicy Bypass -File $HOME\supersuit-bootstrap.ps1     (the normal path)
+#   irm https://supersuit.co/install.ps1 -OutFile $HOME\supersuit-install.ps1
+#   powershell -ExecutionPolicy Bypass -File $HOME\supersuit-install.ps1     (the normal path)
+#   supersuit.co serves this file itself, 200 with no redirect: PowerShell 5.1 does not follow a 308.
 #   Never `irm ... | iex`: `exit` inside an iex'd script closes the PowerShell window, so a
 #   failure would vanish before anyone could read it.
 #   .\bootstrap.ps1 -DryRun          print what would happen, change nothing

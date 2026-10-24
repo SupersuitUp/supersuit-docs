@@ -6,7 +6,7 @@
 # a personal checklist of the human-only steps to do tonight.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/ContinentalWorks/supersuit-docs/main/scripts/preflight.sh | bash
+#   curl -fsSL https://supersuit.co/preflight.sh | bash
 #
 # Executable form of: https://supersuit.wiki/freedom/supersuit-up-workshop/before-you-start
 
