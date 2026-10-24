@@ -29,7 +29,9 @@
 # Homebrew-reviewed casks). It fetches no binaries itself.
 #
 # Usage:
-#   bash bootstrap.sh                  # the normal path
+#   curl -fsSLo ~/supersuit-bootstrap.sh https://raw.githubusercontent.com/ContinentalWorks/supersuit-docs/main/scripts/bootstrap.sh
+#   bash ~/supersuit-bootstrap.sh      # the normal path, as the wiki install page hands it out
+#   bash bootstrap.sh                  # the same, from a checkout of this repo
 #   bash bootstrap.sh --dry-run        # print what would happen, change nothing
 #   bash bootstrap.sh --no-launch      # stop before the handoff
 #   bash bootstrap.sh --print-handoff  # show the handoff command and exit
