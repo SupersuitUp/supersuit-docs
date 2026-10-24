@@ -80,6 +80,12 @@ function Fail([string]$why) {
   Write-Host ""
   Write-Host "    Something went wrong: $why"
   Write-Host "    The full log is at $LogFile. Run this script again; it picks up where it stopped."
+  # Antivirus is the most common cause on Windows and nothing said so (supersuit-dev#886): a fresh
+  # download held by a scan ("being used by another process"), an unsigned exe quarantined, a
+  # script refused with "Access is denied".
+  Write-Host "    If Windows Security or another antivirus showed a block, or the error says 'being used by"
+  Write-Host "    another process' or 'Access is denied': open Windows Security, Protection history, allow"
+  Write-Host "    the item it blocked, and run this script again."
   Log "FAILED: $why"
   exit 1
 }
@@ -102,9 +108,9 @@ function Invoke-Winget([string[]]$wingetArgs) {
 }
 
 function Winget-Install([string]$id, [string]$label) {
-  if ($DryRun) { Write-Host "    [dry-run] would run: winget install --id $id"; return }
+  if ($DryRun) { Write-Host "    [dry-run] would run: winget install --id $id --source winget"; return }
   Write-Host "    installing $label (winget shows the download below)..."
-  $null = Invoke-Winget @("install", "--id", $id, "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity")
+  $null = Invoke-Winget @("install", "--id", $id, "--source", "winget", "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity")
   # winget exits non-zero when the package is already present and up to date; the check that
   # matters is whether the command resolves afterwards, which the caller makes.
   Refresh-Path
@@ -152,7 +158,7 @@ if (Real-Python3) {
   $exe = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "Programs\Python") -Filter python.exe -Recurse -Depth 1 -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
   if (-not $exe) {
     Write-Host "    installing Python 3.12..."
-    $null = Invoke-Winget @("install", "--id", "Python.Python.3.12", "--exact", "--scope", "user", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity")
+    $null = Invoke-Winget @("install", "--id", "Python.Python.3.12", "--source", "winget", "--exact", "--scope", "user", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity")
     $exe = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "Programs\Python") -Filter python.exe -Recurse -Depth 1 -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
   }
   if (-not $exe) { Fail "Python did not install (no python.exe under $env:LOCALAPPDATA\Programs\Python)." }
@@ -201,7 +207,7 @@ Step "Claude Code (the agent)" "the agent that does the rest of the setup, insta
 if (Have "claude") {
   Write-Host "    claude already installed: $(claude --version)"
 } elseif ($DryRun) {
-  Write-Host "    [dry-run] would run: winget install --id Anthropic.ClaudeCode -e --accept-source-agreements --accept-package-agreements"
+  Write-Host "    [dry-run] would run: winget install --id Anthropic.ClaudeCode --source winget -e --accept-source-agreements --accept-package-agreements"
   Write-Host "    [dry-run] and only if that fails, Claude Code's official installer (claude.ai/install.ps1)"
 } else {
   $via = $null
@@ -210,7 +216,7 @@ if (Have "claude") {
     # when it started and what moving looks like, then let winget draw its own bar (Invoke-Winget).
     Write-Host "    installing Claude Code with winget, started $(Get-Date -Format t). The download bar below shows it moving."
     Write-Host "    On a slow connection this can take several minutes. A bar that stops for more than five means check the network."
-    $wingetExit = Invoke-Winget @("install", "--id", "Anthropic.ClaudeCode", "-e", "--accept-source-agreements", "--accept-package-agreements", "--silent", "--disable-interactivity")
+    $wingetExit = Invoke-Winget @("install", "--id", "Anthropic.ClaudeCode", "--source", "winget", "-e", "--accept-source-agreements", "--accept-package-agreements", "--silent", "--disable-interactivity")
     Log "winget install Anthropic.ClaudeCode exited $wingetExit"
     # Non-zero also means "already installed"; what counts is whether claude resolves afterwards.
     Refresh-Path
