@@ -258,17 +258,17 @@ run() { # run <command...> — executes, or narrates under --dry-run
 # spelled as a warning, and test-setup-scripts.sh asserts it never appears.
 #
 # The mode is READ rather than baked in, since #227. bootstrap usually runs on a
-# machine with no ~/.freedom/config.json yet, so in the ordinary case this IS the
+# machine with no ~/.supersuit/config.json yet, so in the ordinary case this IS the
 # default; what it buys is the re-run. An operator who has recorded `auto` and
 # re-bootstraps is not quietly put back on bypass by an installer that predates
-# their decision. The parse matches lib/freedom-permission-mode.mjs exactly, and
+# their decision. The parse matches lib/supersuit-permission-mode.mjs exactly, and
 # test-setup-scripts.sh checks that rather than trusting it.
 freedom_mode() {
   # `:-` is load-bearing: this script runs under `set -u`, and a bare expansion of an unset
   # override aborted the function mid-way and emitted an EMPTY --permission-mode.
   local m="${FREEDOM_PERMISSION_MODE:-}"
   [ -z "$m" ] && m="$(sed -n 's/.*"permissionMode"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p' \
-    "${FREEDOM_HOME:-$HOME}/.freedom/config.json" 2>/dev/null | head -1)"
+    "${FREEDOM_HOME:-$HOME}/.supersuit/config.json" 2>/dev/null | head -1)"
   case "$m" in bypassPermissions|acceptEdits|auto|default|plan) ;; *) m=bypassPermissions ;; esac
   printf '%s' "$m"
 }

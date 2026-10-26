@@ -4,7 +4,7 @@ description: The public version index for Freedom. Every installed workspace pol
 
 # Freedom version index
 
-**Latest version: v6.38.0**
+**Latest version: v7.0.0**
 
 This file is public on purpose, it is deliberately thin, and its FORMAT IS FROZEN.
 
@@ -668,3 +668,4 @@ Newest last.
 ### → v6.36.0 (freedom-payload --write refuses a run that would gut the manifest, and 114 more changes)
 ### → v6.37.0 (unpushed-commits: a commit whose changes landed on origin under another patch is pushed, and 347 more changes)
 ### → v6.38.0 (Main green again after the 784b1a51 landing batch: each red fixed at the code that tripped it, and 2 more changes)
+### → v7.0.0 (Supersuit is Supersuit everywhere: the Freedom name and plugin are retired, and your update moves you to the supersuit marketplace)

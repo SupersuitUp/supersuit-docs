@@ -3,7 +3,7 @@
 # Same boundary as the Mac script, for the same reason: everything that runs BEFORE the agent
 # exists is a step with no recovery, so this does only what an agent cannot do for itself.
 # Node.js, Git for Windows (which brings Git Bash, the shell Claude Code runs its hooks through),
-# jq, Claude Code, and the handoff. Everything else is the install skill it fetches at the end.
+# jq, Claude Code, Claude Desktop (never fatal), and the handoff. Everything else is the install skill it fetches at the end.
 #
 # Official installers only: winget packages (Claude Code included), and Claude Code's own
 # install.ps1 only as the fallback when winget cannot install it. Fetches no binaries itself. Idempotent: every step checks before it acts.
@@ -120,7 +120,7 @@ function Winget-Install([string]$id, [string]$label) {
 Write-Host "=================================================="
 Write-Host "  Supersuit BOOTSTRAP (Windows)"
 if ($DryRun) { Write-Host "  DRY RUN: nothing will be installed or changed." }
-Write-Host "  Four steps, then your agent takes over."
+Write-Host "  A few installs, then your agent takes over."
 Write-Host "  Log: $LogFile"
 Write-Host "=================================================="
 Log "=== bootstrap.ps1 run started (dry_run=$DryRun) ==="
@@ -244,6 +244,46 @@ if (Have "claude") {
   Log "Claude Code installed via $via"
 }
 
+# Claude Desktop, so the setup can move out of this terminal as soon as the terminal-only part is
+# done. Its Code tab runs the same Claude Code, and it has a built-in browser (the Browser pane)
+# the agent can click and type in; computer use treats browsers as view-only, so without it every
+# web step of the setup (Google Cloud's console, a sign-in) came back to the operator as a click
+# list. Gary, 2026-10-25, live during a Windows install whose agent told the operator the app
+# "isn't part of this install": "we have to move to the claude app asap after the terminal shit -
+# CLAUDE DESKTOP APP - and it should be auto downloaded". winget's Anthropic.Claude is the MSIX
+# Anthropic publishes at downloads.claude.ai (x64 and ARM64), the package family below.
+# NEVER fatal: Claude Code is what the setup needs to start, and a missing app is said plainly
+# with the download page, not a failed install.
+$ClaudeDesktopFamily = "Claude_pzs8sxrjxfjjc"
+$ClaudeDesktopDownload = "https://claude.com/download"
+function Have-ClaudeDesktop {
+  try {
+    if (Get-AppxPackage -Name "Claude" -ErrorAction SilentlyContinue | Where-Object { $_.PackageFamilyName -eq $ClaudeDesktopFamily }) { return $true }
+  } catch { }
+  # The installer before the MSIX put the app in the user's own AppData.
+  return (Test-Path (Join-Path $env:LOCALAPPDATA "AnthropicClaude\claude.exe"))
+}
+Step "Claude Desktop (where the rest of the setup happens)" "the Claude app. Its Code tab is where Supersuit runs from the end of this setup on, with a built-in browser your agent can work in. Installed with winget."
+if (Have-ClaudeDesktop) {
+  Write-Host "    Claude Desktop already installed"
+} elseif ($DryRun) {
+  Write-Host "    [dry-run] would run: winget install --id Anthropic.Claude --source winget --exact"
+  Write-Host "    [dry-run] and if that fails, say so and carry on (download page: $ClaudeDesktopDownload)"
+} else {
+  Write-Host "    installing Claude Desktop with winget, started $(Get-Date -Format t). The download bar below shows it moving."
+  $desktopExit = "not run"
+  try { $desktopExit = Invoke-Winget @("install", "--id", "Anthropic.Claude", "--source", "winget", "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity") } catch { $desktopExit = "error: $_" }
+  Log "winget install Anthropic.Claude exited $desktopExit"
+  if (Have-ClaudeDesktop) {
+    Write-Host "    Claude Desktop installed"
+    Log "Claude Desktop installed via winget"
+  } else {
+    Write-Host "    Claude Desktop did not install (winget: $desktopExit). The setup carries on without it for now."
+    Write-Host "    Before the end of setup, install it from $ClaudeDesktopDownload ; your agent will remind you."
+    Log "Claude Desktop NOT installed (winget: $desktopExit); continuing"
+  }
+}
+
 Step "The install skill" "the written instructions the agent follows for the rest of the setup: one text file at $InstallSkillFile."
 if ($DryRun) {
   Write-Host "    [dry-run] would fetch $InstallSkillUrl"
@@ -276,11 +316,16 @@ Write-Host ""
 Write-Host "=================================================="
 Write-Host "  Foundation ready."
 foreach ($c in @("node", "git", "python3", "claude")) { Write-Host ("    {0,-12}{1}" -f $c, $(if (Have $c) { "ok" } else { "MISSING" })) }
+Write-Host ("    {0,-12}{1}" -f "Claude app", $(if (Have-ClaudeDesktop) { "ok" } else { "not yet (install from $ClaudeDesktopDownload)" }))
 Write-Host ""
 Write-Host "  Everything else is done by your agent, which can see what"
 Write-Host "  actually happens on this machine and ask you when something"
 Write-Host "  is not what it expected. The first launch opens a browser so"
 Write-Host "  you can sign in."
+Write-Host ""
+Write-Host "  It starts here in the terminal for a few steps, then moves you"
+Write-Host "  into the Claude app (its Code tab), where it has its own"
+Write-Host "  browser and finishes the setup with you."
 Write-Host "=================================================="
 Log "=== foundation complete, handing off ==="
 
