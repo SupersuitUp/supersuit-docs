@@ -8,7 +8,7 @@
 # Usage:
 #   curl -fsSL https://supersuit.co/preflight.sh | bash
 #
-# Executable form of: https://supersuit.wiki/freedom/supersuit-up-workshop/before-you-start
+# Executable form of: https://wiki.supersuit.co/start-here/install
 
 set -uo pipefail
 
@@ -36,7 +36,7 @@ header() {
 }
 
 echo "=================================================="
-echo "  Freedom PREFLIGHT — the night-before check"
+echo "  Supersuit PREFLIGHT — the night-before check"
 echo "  Read-only: nothing is installed or changed."
 echo "=================================================="
 
@@ -47,7 +47,7 @@ if [[ "$OS" != "Darwin" ]]; then
   echo ""
   echo "This preflight currently supports macOS only."
   echo "On Windows or Linux, follow the manual checklist instead:"
-  echo "  https://supersuit.wiki/freedom/supersuit-up-workshop/before-you-start"
+  echo "  https://wiki.supersuit.co/start-here/install"
   exit 0
 fi
 
@@ -63,22 +63,25 @@ if [[ "$ARCH" == "arm64" ]]; then
   if [[ -n "$MGEN" && "$MGEN" -ge 4 ]]; then
     row "$PASS" "Chip" "$CHIP (Apple Silicon, M4 or newer)"
   elif [[ -n "$MGEN" ]]; then
-    row "$WARN" "Chip" "$CHIP — runs, but M4 or newer is the floor; expect slower sessions. See https://getfreedom.wiki/start-here/what-machine-you-need"
+    row "$WARN" "Chip" "$CHIP — runs, but M4 or newer is the floor; expect slower sessions. See https://wiki.supersuit.co/start-here/what-machine-you-need"
   else
     row "$PASS" "Chip" "$CHIP (Apple Silicon)"
   fi
 else
-  row "$FAIL" "Chip" "$CHIP — Intel Mac. The workshop will be painful; there is no software workaround. See https://supersuit.wiki/reference/laptop-requirements"
+  row "$FAIL" "Chip" "$CHIP — Intel Mac. The workshop will be painful; there is no software workaround. See https://wiki.supersuit.co/start-here/what-machine-you-need"
 fi
 
-RAM_BYTES="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
+# 32 GB is the floor (wiki: start-here/what-machine-you-need). 16 to 31 GB runs with fewer
+# sessions and slower transcription, so it WARNS; until 2026-11-01 it passed while its own
+# text called 32 GB the floor (#1493). FREEDOM_RAM_BYTES lets a test grade any size.
+RAM_BYTES="${FREEDOM_RAM_BYTES:-$(sysctl -n hw.memsize 2>/dev/null || echo 0)}"
 RAM_GB=$((RAM_BYTES / 1073741824))
 if [[ "$RAM_GB" -ge 32 ]]; then
-  row "$PASS" "RAM" "${RAM_GB} GB (comfortable)"
+  row "$PASS" "RAM" "${RAM_GB} GB (meets the 32 GB floor)"
 elif [[ "$RAM_GB" -ge 16 ]]; then
-  row "$PASS" "RAM" "${RAM_GB} GB (honest minimum; 32 GB is the comfortable floor)"
+  row "$WARN" "RAM" "${RAM_GB} GB — runs, but 32 GB is the floor; expect fewer sessions and slower transcription. See https://wiki.supersuit.co/start-here/what-machine-you-need"
 else
-  row "$FAIL" "RAM" "${RAM_GB} GB — below the 16 GB minimum. See https://supersuit.wiki/reference/laptop-requirements"
+  row "$FAIL" "RAM" "${RAM_GB} GB — below the 16 GB minimum. See https://wiki.supersuit.co/start-here/what-machine-you-need"
 fi
 
 DISK_AVAIL_GB="$(df -g / 2>/dev/null | awk 'NR==2 {print $4}')"
@@ -222,7 +225,7 @@ N=$((N + 1))
 echo "  $N. Have a working credit card ready (most tools need one on file, even free tiers)."
 N=$((N + 1))
 echo "  $N. Decide your harness plan: Claude Pro (\$20/mo) or Max (\$100/mo). See"
-echo "     https://supersuit.wiki/freedom/supersuit-up-workshop/install-your-tools"
+echo "     https://wiki.supersuit.co/start-here/install"
 N=$((N + 1))
 echo "  $N. Create a Granola account at https://granola.ai (meeting notes, free tier"
 echo "     is enough to start). The install session installs the app; you sign in."
@@ -247,5 +250,5 @@ fi
 echo "=================================================="
 echo ""
 echo "On workshop day, run the bootstrap script:"
-echo "  https://supersuit.wiki/freedom/one-command-setup"
+echo "  https://wiki.supersuit.co/start-here/install"
 echo ""
