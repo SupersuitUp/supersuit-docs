@@ -4,7 +4,7 @@ description: The public version index for Freedom. Every installed workspace pol
 
 # Freedom version index
 
-**Latest version: v7.5.0**
+**Latest version: v7.6.0**
 
 This file is public on purpose, it is deliberately thin, and its FORMAT IS FROZEN.
 
@@ -674,3 +674,4 @@ Newest last.
 ### → v7.3.0 (Recommended reads clearly, and sixteen fixes from operator reports)
 ### → v7.4.0 (Reconcile card: per-item choices as data, and holds filed under a symlinked workspace name answer again, and 148 more changes)
 ### → v7.5.0 (end-a-session: a background job started from a bg-spare can end itself (#1499), and 71 more changes)
+### → v7.6.0 (enterprise guard: tell the company's owners, and guard documents, transcripts, people and Bash copies, and 77 more changes)
