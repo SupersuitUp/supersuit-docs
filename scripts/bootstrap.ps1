@@ -31,7 +31,7 @@ $InstallSkillUrl = if ($env:FREEDOM_INSTALL_SKILL_URL) { $env:FREEDOM_INSTALL_SK
 # file, the old URL is a fallback, and a Location header on any failure is followed by hand.
 $InstallSkillUrls = @($InstallSkillUrl)
 if (-not $env:FREEDOM_INSTALL_SKILL_URL) { $InstallSkillUrls += "https://www.getfreedom.wiki/skills/install-freedom-windows/SKILL.md" }
-$InstallSkillFile = Join-Path $HOME ".freedom-install.md"
+$InstallSkillFile = Join-Path $HOME ".supersuit-install.md"
 $LogFile = Join-Path $HOME ".freedom-setup.log"
 
 function Log([string]$line) {

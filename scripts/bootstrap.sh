@@ -48,7 +48,7 @@ set -uo pipefail
 # which is what keeps the private-repo GitHub login on the agent's side of the
 # boundary instead of dragging it back into this script.
 INSTALL_SKILL_URL="${FREEDOM_INSTALL_SKILL_URL:-https://getfreedom.wiki/skills/install-freedom/SKILL.md}"
-INSTALL_SKILL_FILE="$HOME/.freedom-install.md"
+INSTALL_SKILL_FILE="$HOME/.supersuit-install.md"
 
 LOG_FILE="$HOME/.freedom-setup.log"
 

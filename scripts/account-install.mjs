@@ -34,7 +34,8 @@ import { fileURLToPath } from "node:url";
 
 export const MARKETPLACE_URL = "https://app.supersuit.co/api/plugin/marketplace.json";
 export const MIN_CLAUDE = "2.1.238";
-const PORTAL = process.env.FREEDOM_PORTAL || "https://freedom.continentalworks.ai";
+export const PORTAL_DEFAULT = "https://app.supersuit.co";
+const PORTAL = process.env.FREEDOM_PORTAL || PORTAL_DEFAULT;
 const API_KEY = process.env.FREEDOM_FIREBASE_API_KEY || "AIzaSyCjDs2AeeYo4s4Osudq6YDwNbjWCqexU_g";
 const PROJECT = process.env.FREEDOM_FIREBASE_PROJECT || "cci-paos-analytics";
 
@@ -53,12 +54,31 @@ export function versionAtLeast(text, min) {
   return true;
 }
 
-/** Claude Code runs this through sh: absolute paths, quoted, printable ASCII, at most 500 chars. */
-export function helperCommand(node, script) {
-  if (/["\\$`]/.test(node + script)) throw new Error("a path with a quote, backslash, $ or backtick cannot be quoted safely");
+/**
+ * Claude Code runs this through a shell: sh on a Mac; on Windows cmd.exe or Git Bash. Absolute paths,
+ * double-quoted, printable ASCII, at most 500 chars. On Windows the paths are written with forward
+ * slashes, which both cmd.exe and Git Bash run, and node reads; a backslash there is a path
+ * separator to cmd and an escape to bash, so no one quoting is right for both. % (cmd) and $ and `
+ * (bash) expand inside double quotes, so a path holding any of them is refused rather than quoted.
+ */
+export function helperCommand(node, script, platform = process.platform) {
+  if (platform === "win32") {
+    [node, script] = [node, script].map((p) => p.replace(/\\/g, "/"));
+    if (/["%$`!]/.test(node + script)) throw new Error("a path with a quote, %, $, ! or backtick cannot be quoted safely");
+  } else if (/["\\$`]/.test(node + script)) throw new Error("a path with a quote, backslash, $ or backtick cannot be quoted safely");
   const c = `"${node}" "${script}" headers`;
   if (c.length > 500 || !/^[\x20-\x7e]+$/.test(c) || / {4}/.test(c)) throw new Error("the helper command breaks Claude Code's rules");
   return c;
+}
+
+/**
+ * The command that opens a page in the default browser. On Windows `explorer <url>` opened nothing
+ * on the Dell (2026-11-02), and `cmd /c start` splits a URL at its &; rundll32's protocol handler
+ * takes the URL whole.
+ */
+export function openCommand(url, platform = process.platform) {
+  if (platform === "win32") return ["rundll32", ["url.dll,FileProtocolHandler", url]];
+  return [platform === "darwin" ? "open" : "xdg-open", [url]];
 }
 
 /** The user settings with Supersuit's account marketplace declared and its plugin switched on. */
@@ -76,6 +96,31 @@ export function knownSupersuit(dir = claudeDir()) {
   const src = k?.supersuit?.source;
   if (!src) return null;
   return { kind: src.source, account: src.source === "url" && src.url === MARKETPLACE_URL };
+}
+
+/** The folder Claude Code installed Supersuit into, from its install record, or null. */
+export function supersuitInstallPath(dir = claudeDir()) {
+  const rows = readJson(join(dir, "plugins", "installed_plugins.json"))?.plugins?.["supersuit@supersuit"];
+  const row = Array.isArray(rows) ? (rows.find((r) => r?.scope === "user") || rows[0]) : null;
+  return row?.installPath && existsSync(row.installPath) ? row.installPath : null;
+}
+
+/**
+ * Put ~/.supersuit/bin/supersuit-lib (and the ~/.supersuit/plugin link) in place NOW, not at the next
+ * session event (supersuit-dev#1655, reported by Tres Davis). Only the plugin's session-alive hook
+ * ever wrote the resolver, and a plugin installed mid-session has no hooks running until
+ * /reload-plugins, so every skill step that calls supersuit-lib failed in the very session that
+ * installed it. This runs that same hook from the copy just installed, once, with liveness off
+ * (FREEDOM_SESSION_ALIVE=off) and CLAUDE_PLUGIN_ROOT emptied, so there is one writer of the resolver
+ * and this file still imports nothing. -> true when supersuit-lib is there afterwards.
+ */
+export function primeResolver(installPath, { home: h = home(), env = process.env } = {}) {
+  const hook = installPath ? join(installPath, "hooks", "session-alive.sh") : null;
+  if (hook && existsSync(hook)) {
+    spawnSync("bash", [hook], { input: "", stdio: ["pipe", "ignore", "ignore"], timeout: 30_000,
+      env: { ...env, HOME: h, FREEDOM_HOME: h, CLAUDE_PLUGIN_ROOT: "", FREEDOM_SESSION_ALIVE: "off" } });
+  }
+  return existsSync(join(h, ".supersuit", "bin", "supersuit-lib"));
 }
 
 const TOKEN = /^[A-Za-z0-9._-]+$/;
@@ -121,7 +166,8 @@ async function signIn() {
     signal: AbortSignal.timeout(10000) })).json();
   say(`Your code: ${start.userCode}`);
   say(`Approve it in the browser page that names that code: ${start.verifyUrlComplete}`);
-  spawnSync(process.platform === "win32" ? "explorer" : "open", [start.verifyUrlComplete], { stdio: "ignore" });
+  const [opener, openArgs] = openCommand(start.verifyUrlComplete);
+  spawnSync(opener, openArgs, { stdio: "ignore" });
   const deadline = start.expiresAt ?? Date.now() + 10 * 60_000;
   const every = Math.max(1, Number(start.interval) || 2) * 1000;
   while (Date.now() < deadline) {
@@ -176,7 +222,7 @@ async function install({ check, switchFromGithub }) {
 
   const known = knownSupersuit();
   if (known && !known.account && !switchFromGithub) {
-    say(`This Mac already gets Supersuit from ${known.kind === "github" ? "GitHub" : known.kind}; nothing was changed.`);
+    say(`This computer already gets Supersuit from ${known.kind === "github" ? "GitHub" : known.kind}; nothing was changed.`);
     say("Run again with --switch to get it from your Supersuit account instead.");
     return 0;
   }
@@ -184,7 +230,7 @@ async function install({ check, switchFromGithub }) {
 
   if (!readJson(join(stateDir(), "auth.json"))?.refreshToken) say(`Signed in as ${await signIn()}`);
   else say("Already signed in to Supersuit");
-  if (!(await idToken())) throw new Error("this Mac's Supersuit sign-in did not give a token; sign in again (delete ~/.supersuit/auth.json, then run this again)");
+  if (!(await idToken())) throw new Error("this computer's Supersuit sign-in did not give a token; sign in again (delete ~/.supersuit/auth.json, then run this again)");
 
   const bin = join(stateDir(), "bin");
   mkdirSync(bin, { recursive: true });
@@ -192,7 +238,10 @@ async function install({ check, switchFromGithub }) {
   copyFileSync(realpathSync(fileURLToPath(import.meta.url)), helperFile);
   chmodSync(helperFile, 0o755);
   const helper = helperCommand(stableNode(), helperFile);
-  const probe = spawnSync("sh", ["-c", helper], { encoding: "utf8", timeout: 10_000 });
+  // Run it the way Claude Code will: sh on a Mac, the system shell (cmd.exe) on Windows.
+  const probe = process.platform === "win32"
+    ? spawnSync(helper, { shell: true, encoding: "utf8", timeout: 10_000 })
+    : spawnSync("sh", ["-c", helper], { encoding: "utf8", timeout: 10_000 });
   if (probe.status !== 0 || !headerJson(JSON.parse(probe.stdout || "{}").Authorization?.slice(7))) throw new Error("the sign-in helper did not print a header; nothing was changed in Claude Code");
 
   const settingsFile = join(claudeDir(), "settings.json");
@@ -214,6 +263,8 @@ async function install({ check, switchFromGithub }) {
   const ver = /supersuit@supersuit[\s\S]*?Version:\s*(\S+)/.exec(list)?.[1];
   if (!ver) throw new Error("Claude Code reported the install, but `claude plugin list` does not show supersuit@supersuit");
   say(`Supersuit ${ver} installed from your Supersuit account. Updates come the same way.`);
+  if (primeResolver(supersuitInstallPath())) say("Its skills can run in this session: ~/.supersuit/bin/supersuit-lib is in place");
+  else say("Run /reload-plugins (or open a new Claude Code session) before using a skill: ~/.supersuit/bin/supersuit-lib is not in place yet");
   return 0;
 }
 
