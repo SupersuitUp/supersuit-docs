@@ -5,6 +5,7 @@
 //   node account-install.mjs            sign in if needed, then install Supersuit
 //   node account-install.mjs --check    say what would happen, change nothing
 //   node account-install.mjs --switch   also move a Mac that gets Supersuit from GitHub today
+//   node account-install.mjs --no-sign-in   stop instead of signing in (the unattended move in an update)
 //   node account-install.mjs headers    the marketplace's headersHelper (Claude Code runs this)
 //
 // Design: "Installing Freedom without GitHub" (2026-10-14) and superproject install-without-github,
@@ -26,7 +27,7 @@
 // The token code below repeats supersuit-auth.mjs's idToken on purpose (a third copy, the analytics
 // sender holds the second): this file must run with nothing else on disk. Change the token shape in
 // all three, and run tests/account-install.test.mjs, tests/plugin-headers.test.mjs.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, chmodSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, chmodSync, realpathSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir, hostname } from "node:os";
 import { spawnSync, spawn } from "node:child_process";
@@ -154,8 +155,11 @@ async function idToken() {
 const say = (s = "") => process.stderr.write(`  ${s}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The daily update runs from launchd with a short PATH, so it names the binary it found.
+const claudeBin = () => process.env.FREEDOM_CLAUDE_BIN || "claude";
+
 function claude(args, opts = {}) {
-  const r = spawnSync("claude", args, { encoding: "utf8", timeout: 300_000, ...opts });
+  const r = spawnSync(claudeBin(), args, { encoding: "utf8", timeout: 300_000, ...opts });
   return { code: r.error ? 127 : r.status, out: `${r.stdout || ""}${r.stderr || ""}` };
 }
 
@@ -201,8 +205,10 @@ function stableNode() {
 
 /** Start one session so Claude Code registers the declared marketplace. It may say "Not logged in"; that is fine. */
 async function registerDeclared() {
-  const child = spawn("claude", ["-p", "reply ok"], { stdio: "ignore",
-    env: { ...process.env, CLAUDE_CODE_SYNC_PLUGIN_INSTALL: "1" } });
+  const child = spawn(claudeBin(), ["-p", "reply ok"], { stdio: "ignore",
+    // FREEDOM_AUTO_UPDATE=off: this session loads the Supersuit hooks, and an update it started would
+    // run this move again from inside the move.
+    env: { ...process.env, CLAUDE_CODE_SYNC_PLUGIN_INSTALL: "1", FREEDOM_AUTO_UPDATE: "off" } });
   let exitedAt = null;
   child.on("exit", () => { exitedAt = Date.now(); });
   const until = Date.now() + 120_000;
@@ -214,7 +220,7 @@ async function registerDeclared() {
   return knownSupersuit()?.account === true;
 }
 
-async function install({ check, switchFromGithub }) {
+async function install({ check, switchFromGithub, noSignIn }) {
   const v = claude(["--version"]);
   if (v.code !== 0) throw new Error("Claude Code is not installed (`claude --version` did not run)");
   if (!versionAtLeast(v.out, MIN_CLAUDE)) throw new Error(`Claude Code ${v.out.trim()} is too old; update it to ${MIN_CLAUDE} or later (\`claude update\`)`);
@@ -228,8 +234,10 @@ async function install({ check, switchFromGithub }) {
   }
   if (check) { say(known?.account ? "Supersuit already comes from your Supersuit account" : "would sign in, declare the account marketplace and install Supersuit"); return 0; }
 
-  if (!readJson(join(stateDir(), "auth.json"))?.refreshToken) say(`Signed in as ${await signIn()}`);
-  else say("Already signed in to Supersuit");
+  if (!readJson(join(stateDir(), "auth.json"))?.refreshToken) {
+    if (noSignIn) throw new Error("not signed in to Supersuit; nothing was changed");
+    say(`Signed in as ${await signIn()}`);
+  } else say("Already signed in to Supersuit");
   if (!(await idToken())) throw new Error("this computer's Supersuit sign-in did not give a token; sign in again (delete ~/.supersuit/auth.json, then run this again)");
 
   const bin = join(stateDir(), "bin");
@@ -248,20 +256,30 @@ async function install({ check, switchFromGithub }) {
   mkdirSync(claudeDir(), { recursive: true });
   const before = existsSync(settingsFile) ? readJson(settingsFile) : {};
   if (before === null) throw new Error(`${settingsFile} is not valid JSON; fix it, then run this again`);
+  // Claude Code's two records of the source, as they stand. A failure below puts both back, byte for
+  // byte: a Mac declaring one source and registered to another is worse than a Mac that did not move.
+  const knownFile = join(claudeDir(), "plugins", "known_marketplaces.json");
+  const undo = [settingsFile, knownFile].map((f) => [f, existsSync(f) ? readFileSync(f) : null]);
   writeFileSync(settingsFile, JSON.stringify(withAccountMarketplace(before, helper), null, 2) + "\n");
-  say(`Supersuit's marketplace declared in ${settingsFile}`);
+  let ver;
+  try {
+    say(`Supersuit's marketplace declared in ${settingsFile}`);
 
-  if (!knownSupersuit()?.account && !(await registerDeclared())) {
-    throw new Error("Claude Code did not register the marketplace; open Claude Code once (it registers it at start), then run this again");
+    if (!knownSupersuit()?.account && !(await registerDeclared())) {
+      throw new Error("Claude Code did not register the marketplace; open Claude Code once (it registers it at start), then run this again");
+    }
+    say("Claude Code registered the marketplace at app.supersuit.co");
+    const up = claude(["plugin", "marketplace", "update", "supersuit"]);
+    if (up.code !== 0) throw new Error(`refreshing the marketplace failed: ${up.out.trim().split("\n").pop()}`);
+    const inst = claude(["plugin", "install", "supersuit@supersuit", "--scope", "user"]);
+    if (inst.code !== 0 && !/already/i.test(inst.out)) throw new Error(`installing Supersuit failed: ${inst.out.trim().split("\n").pop()}`);
+    const list = claude(["plugin", "list"]).out;
+    ver = /supersuit@supersuit[\s\S]*?Version:\s*(\S+)/.exec(list)?.[1];
+    if (!ver) throw new Error("Claude Code reported the install, but `claude plugin list` does not show supersuit@supersuit");
+  } catch (e) {
+    for (const [f, bytes] of undo) { if (bytes === null) rmSync(f, { force: true }); else writeFileSync(f, bytes); }
+    throw e;
   }
-  say("Claude Code registered the marketplace at app.supersuit.co");
-  const up = claude(["plugin", "marketplace", "update", "supersuit"]);
-  if (up.code !== 0) throw new Error(`refreshing the marketplace failed: ${up.out.trim().split("\n").pop()}`);
-  const inst = claude(["plugin", "install", "supersuit@supersuit", "--scope", "user"]);
-  if (inst.code !== 0 && !/already/i.test(inst.out)) throw new Error(`installing Supersuit failed: ${inst.out.trim().split("\n").pop()}`);
-  const list = claude(["plugin", "list"]).out;
-  const ver = /supersuit@supersuit[\s\S]*?Version:\s*(\S+)/.exec(list)?.[1];
-  if (!ver) throw new Error("Claude Code reported the install, but `claude plugin list` does not show supersuit@supersuit");
   say(`Supersuit ${ver} installed from your Supersuit account. Updates come the same way.`);
   if (primeResolver(supersuitInstallPath())) say("Its skills can run in this session: ~/.supersuit/bin/supersuit-lib is in place");
   else say("Run /reload-plugins (or open a new Claude Code session) before using a skill: ~/.supersuit/bin/supersuit-lib is not in place yet");
@@ -285,7 +303,7 @@ if (isMain) {
     process.exitCode = line ? 0 : 1;
   } else {
     try {
-      process.exitCode = await install({ check: args.includes("--check"), switchFromGithub: args.includes("--switch") });
+      process.exitCode = await install({ check: args.includes("--check"), switchFromGithub: args.includes("--switch"), noSignIn: args.includes("--no-sign-in") });
     } catch (e) {
       say(`Stopped: ${e.message}`);
       process.exitCode = 1;

@@ -4,7 +4,7 @@ description: The public version index for Freedom. Every installed workspace pol
 
 # Freedom version index
 
-**Latest version: v7.10.0**
+**Latest version: v7.11.0**
 
 This file is public on purpose, it is deliberately thin, and its FORMAT IS FROZEN.
 
@@ -679,3 +679,4 @@ Newest last.
 ### → v7.8.0 (update-surfaces test: start surface spawns in the throwaway HOME, and 122 more changes)
 ### → v7.9.0 (organizations: filing the operator's own superproject makes their company record; audit scopes to one company, and 89 more changes)
 ### → v7.10.0 (Question kinds: seven kinds, one name each, in one table, and 113 more changes)
+### → v7.11.0 (Take it off my plate: the owner of a company superproject can close it, and 186 more changes)
