@@ -499,7 +499,7 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 0
 fi
 
-# THE INSTALL IS ONE HALF OF A CO-BUILD SESSION, never a solo run. The skill's first section
+# THE INSTALL IS ONE HALF OF A CO-BUILD MEETING, never a solo run. The skill's first section
 # asks whether the person who invited them is on with them and refuses to continue when the
 # answer is no; the prompt says so too, so the agent does not read that section as a
 # formality. A new operator followed the skill alone on 2026-09-19, dead-ended at the editor

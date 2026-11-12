@@ -38,10 +38,27 @@ function Log([string]$line) {
   try { Add-Content -Path $LogFile -Value ("{0} {1}" -f (Get-Date -Format s), $line) } catch { }
 }
 
+# The per-machine config, found the way every other reader finds it (supersuit-dev#2319): FREEDOM_HOME or
+# the home folder, then the state folder stateDirName() picks. .supersuit, unless only .freedom exists,
+# or both exist as two real folders (neither is a link), where .freedom wins as it does in node.
+# This read .freedom\config.json outright until 2026-11-10, a different file from bootstrap.sh's.
+function Supersuit-Config {
+  $h = if ($env:FREEDOM_HOME) { $env:FREEDOM_HOME } else { $HOME }
+  $neu = Join-Path $h ".supersuit"
+  $old = Join-Path $h ".freedom"
+  $dir = $neu
+  if (-not (Test-Path $neu)) {
+    if (Test-Path $old) { $dir = $old }
+  } elseif (Test-Path $old) {
+    if (-not ((Get-Item $neu -Force).LinkType -or (Get-Item $old -Force).LinkType)) { $dir = $old }
+  }
+  return (Join-Path $dir "config.json")
+}
+
 function Freedom-Mode {
   $m = $env:FREEDOM_PERMISSION_MODE
   if (-not $m) {
-    $cfg = Join-Path $HOME ".freedom\config.json"
+    $cfg = Supersuit-Config
     if (Test-Path $cfg) {
       $hit = Select-String -Path $cfg -Pattern '"permissionMode"\s*:\s*"([A-Za-z]+)"' | Select-Object -First 1
       if ($hit) { $m = $hit.Matches[0].Groups[1].Value }

@@ -295,7 +295,12 @@ const isMain = (() => {
 })();
 if (isMain) {
   const args = process.argv.slice(2);
-  if (args[0] === "headers") {
+  // --help prints the header's usage and writes nothing (#2208). Inline, not supersuit-cli-help.mjs,
+  // for the same reason as isMain above: importing it broke the download-alone install on 2026-11-09.
+  if (args.includes("--help") || args.includes("-h")) {
+    const head = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1);
+    process.stdout.write(head.slice(0, head.findIndex((l) => !l.startsWith("//") || l.startsWith("// Design:"))).map((l) => l.replace(/^\/\/ ?/, "")).join("\n") + "\n");
+  } else if (args[0] === "headers") {
     // stdout is Claude Code's: the JSON object and not one byte more.
     let line = "";
     try { line = headerJson(await idToken()); } catch { line = ""; }
