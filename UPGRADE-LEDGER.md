@@ -4,7 +4,7 @@ description: The public version index for Freedom. Every installed workspace pol
 
 # Freedom version index
 
-**Latest version: v8.0.0**
+**Latest version: v8.1.0**
 
 This file is public on purpose, it is deliberately thin, and its FORMAT IS FROZEN.
 
@@ -681,3 +681,4 @@ Newest last.
 ### → v7.10.0 (Question kinds: seven kinds, one name each, in one table, and 113 more changes)
 ### → v7.11.0 (Take it off my plate: the owner of a company superproject can close it, and 186 more changes)
 ### → v8.0.0 (Supersuit 8.0: one object model and its standards, recordings with voice and video, session names that fit the phone, and waves of fixes)
+### → v8.1.0 (pointConfigAt refuses a config it cannot parse instead of wiping it, and 414 more changes)
