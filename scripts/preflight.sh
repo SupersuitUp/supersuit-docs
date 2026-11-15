@@ -21,8 +21,14 @@ FAILURES=0
 
 APPS_DIR="${FREEDOM_APPS_DIR:-/Applications}"   # overridable so tests can exercise the cold path
 
-row() { # row <icon> <label> <detail>
+REPORT_ROWS=""
+row() { # row <icon> <label> <detail> [<detail for the report, when the shown one names the person>]
   printf "  %s %-18s %s\n" "$1" "$2" "$3"
+  local word
+  case "$1" in
+    "$PASS") word=PASS ;; "$WARN") word=WARN ;; "$FAIL") word=FAIL ;; *) word=NOTE ;;
+  esac
+  REPORT_ROWS+="$2: $word  ${4:-$3}"$'\n'
   case "$1" in
     "$WARN") WARNINGS=$((WARNINGS + 1)) ;;
     "$FAIL") FAILURES=$((FAILURES + 1)) ;;
@@ -45,8 +51,9 @@ echo "=================================================="
 OS="$(uname -s)"
 if [[ "$OS" != "Darwin" ]]; then
   echo ""
-  echo "This preflight currently supports macOS only."
-  echo "On Windows or Linux, follow the manual checklist instead:"
+  echo "This check is for a Mac. On Windows, open PowerShell and run:"
+  echo "  irm https://supersuit.co/preflight.ps1 | iex"
+  echo "On Linux, follow the manual checklist instead:"
   echo "  https://wiki.supersuit.co/start-here/install"
   exit 0
 fi
@@ -192,7 +199,7 @@ fi
 GH_READY=0
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   GH_USER="$(gh api user -q .login 2>/dev/null || echo "")"
-  row "$PASS" "GitHub" "logged in${GH_USER:+ as $GH_USER}"
+  row "$PASS" "GitHub" "logged in${GH_USER:+ as $GH_USER}" "logged in"
   GH_READY=1
 else
   row "$WARN" "GitHub" "not logged in on this machine (account signup + login are human steps)"
@@ -252,3 +259,44 @@ echo ""
 echo "On workshop day, run the bootstrap script:"
 echo "  https://wiki.supersuit.co/start-here/install"
 echo ""
+
+# ---------- The report to send the Supersuit team (#2839) ----------
+#
+# The same rows, one line each, with a verdict on top. It never carries the username, the home path
+# or the machine name: a row that shows one passes a plain detail as row's fourth argument.
+if [[ "$FAILURES" -gt 0 ]]; then
+  VERDICT_LINE="Not ready: $FAILURES blocker$([[ "$FAILURES" -eq 1 ]] || echo s)"
+elif [[ "$WARNINGS" -gt 0 ]]; then
+  VERDICT_LINE="Ready, with $WARNINGS item$([[ "$WARNINGS" -eq 1 ]] || echo s) to note"
+else
+  VERDICT_LINE="Ready"
+fi
+DAY="$(date +%Y-%m-%d)"
+REPORT="SUPERSUIT READINESS REPORT
+Date: $DAY
+System: macOS $OS_VERSION ($ARCH, $CHIP)
+Checked by: preflight.sh
+VERDICT: $VERDICT_LINE
+
+${REPORT_ROWS}"
+REPORT="${REPORT//$HOME/~}"
+echo "VERDICT: $VERDICT_LINE"
+echo ""
+echo "----- SUPERSUIT READINESS REPORT (copy from here) -----"
+printf "%s" "$REPORT"
+echo "----- end of report -----"
+DEST="$HOME/Downloads"
+[[ -d "$DEST" ]] || DEST="$HOME"
+REPORT_FILE="$DEST/supersuit-readiness-$DAY.txt"
+SAVED=""; COPIED=""
+printf "%s" "$REPORT" > "$REPORT_FILE" 2>/dev/null && SAVED=1
+if [[ -z "${SUPERSUIT_NO_CLIPBOARD:-}" ]] && command -v pbcopy >/dev/null 2>&1; then
+  printf "%s" "$REPORT" | pbcopy 2>/dev/null && COPIED=1
+fi
+echo ""
+if [[ -n "$COPIED" && -n "$SAVED" ]]; then
+  echo "The report is copied to your clipboard, and saved as supersuit-readiness-$DAY.txt in your Downloads folder."
+elif [[ -n "$SAVED" ]]; then
+  echo "The report is saved as supersuit-readiness-$DAY.txt in your Downloads folder."
+fi
+echo "Paste this into your email to the Supersuit team, or attach the file."

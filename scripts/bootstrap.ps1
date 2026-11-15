@@ -104,7 +104,129 @@ function Fail([string]$why) {
   Write-Host "    If Windows Security or another antivirus showed a block, or the error says 'being used by"
   Write-Host "    another process' or 'Access is denied': open Windows Security, Protection history, allow"
   Write-Host "    the item it blocked, and run this script again."
+  # A work PC's own policy (Intune, WDAC, app control) refuses the same way and no antivirus screen
+  # shows it (supersuit-dev#2837). When that is winget, Stop-WingetBlocked says so and writes the IT ask.
+  Write-Host "    On a work PC, your company's device management can block installs too: then your IT has to"
+  Write-Host "    allow them. If it is winget they block, this script says so and writes the request for you."
   Log "FAILED: $why"
+  exit 1
+}
+
+# A MANAGED PC THAT BLOCKS WINGET (supersuit-dev#2837, 2026-11-14). On an Entra-joined PC, company
+# policy (Intune app control, WDAC, AutoElevate, a Defender rule) can refuse Windows Package Manager:
+# Start-Process answers "This command cannot be run due to the error: Access is denied.", a direct
+# call is denied the same way, and running as administrator does not help. Until this, the run
+# printed that stack trace and went on to the next winget install, denied again, and the operator
+# wrote his IT a request by hand on the call. Gary: "lets forever remember to make sure that windows
+# people etc always get unblocked to succeed with supersuit". So: detect it once, stop once, and
+# leave exactly the request that unblocks them, on screen and in a file they can email as it is.
+# A tool already on PATH never needs winget, so a PC where IT installed the tools finishes with none.
+$ItRequestFile = Join-Path $HOME "supersuit-it-request.txt"
+# What the installer needs from winget, by the command that proves it. The doctor reads the
+# "Tools still needed:" line of the request file back (supersuit-setup-probes.mjs wingetBlockedState).
+$NeededTools = [ordered]@{
+  "node"    = "OpenJS.NodeJS.LTS (Node.js LTS)"
+  "git"     = "Git.Git (Git for Windows, which brings Git Bash)"
+  "jq"      = "jqlang.jq (jq)"
+  "python3" = "Python.Python.3.12 (Python 3.12, installed per-user)"
+  "claude"  = "Anthropic.ClaudeCode (Claude Code)"
+}
+$script:WingetBlocked = $null
+
+# Freedom's scripts call `python3` by that name: 65 times across the skills, and from node, whose
+# spawn finds only a real .exe by bare name. A stock Windows PC has no python3 at all, or the
+# Microsoft Store stub that opens the Store instead of running (exit 9009). Defined up here because
+# the blocked-winget check reads it before the Python step runs.
+function Real-Python3 {
+  if (-not (Have "python3")) { return $false }
+  try { $v = & python3 --version 2>&1; return ($LASTEXITCODE -eq 0 -and "$v" -match "^Python 3") } catch { return $false }
+}
+
+# The tools in $NeededTools this PC does not have yet, by command name.
+function Missing-Tools {
+  $m = @()
+  foreach ($t in $NeededTools.Keys) {
+    if ($t -eq "python3") { if (-not (Real-Python3)) { $m += $t } }
+    elseif (-not (Have $t)) { $m += $t }
+  }
+  return $m
+}
+
+# True when an error is Windows refusing to start a program: "Access is denied" (Win32 error 5,
+# HRESULT 0x80070005), in English or not, at any depth of the exception chain.
+function Test-AccessDenied($err) {
+  $e = $err
+  if ($e -is [System.Management.Automation.ErrorRecord]) { $e = $e.Exception }
+  while ($e) {
+    if ($e -is [System.ComponentModel.Win32Exception] -and $e.NativeErrorCode -eq 5) { return $true }
+    if ($e.HResult -eq -2147024891) { return $true }
+    if ("$($e.Message)" -match "Access is denied|0x80070005") { return $true }
+    $e = $e.InnerException
+  }
+  return $false
+}
+
+# Whether company policy blocks winget on this PC: one direct call (`winget --version`), asked once
+# per run and remembered. No winget at all is not "blocked"; that has its own message.
+function Test-WingetBlocked {
+  if ($null -ne $script:WingetBlocked) { return $script:WingetBlocked }
+  $script:WingetBlocked = $false
+  $cmd = Get-Command winget -ErrorAction SilentlyContinue
+  if (-not $cmd) { return $false }
+  try { $null = & $cmd.Source --version }
+  catch {
+    if (Test-AccessDenied $_) { $script:WingetBlocked = $true; Log "winget blocked (direct call): $($_.Exception.Message)" }
+  }
+  return $script:WingetBlocked
+}
+
+# The request for IT, word for word: on screen, and in $ItRequestFile so it can be emailed as it is.
+function It-Request([string[]]$missing) {
+  $who = "$env:USERNAME on $env:COMPUTERNAME"
+  $lines = @(
+    "Subject: Please allow Windows Package Manager (winget) for my account, or install a few tools",
+    "",
+    "Hello,",
+    "",
+    "I am setting up Supersuit, an AI work tool, on my PC ($who). Company policy on this PC blocks Windows Package Manager (winget): it fails with 'Access is denied', also when run as administrator.",
+    "",
+    "Could you do one of these two things?",
+    "",
+    "Option A: allow Windows Package Manager (App Installer, package family Microsoft.DesktopAppInstaller_8wekyb3d8bbwe) for my user account.",
+    "",
+    "Option B: install these packages for me and put them on my PATH:"
+  )
+  foreach ($t in $missing) { $lines += "  - $($NeededTools[$t])" }
+  $lines += @(
+    "",
+    "Either way, please confirm that node, git, python and claude can run from my user profile, and that Git Bash (C:\Program Files\Git\bin\bash.exe) is not blocked.",
+    "",
+    "Thank you.",
+    "",
+    "Tools still needed: $($missing -join ', ')"
+  )
+  return $lines
+}
+
+# Stop ONCE, say plainly what blocks the install, print the IT request and save it. Never a retry
+# of the next winget install, which would be denied the same way.
+function Stop-WingetBlocked([string]$detail) {
+  $missing = @(Missing-Tools)
+  if ($missing.Count -eq 0) { $missing = @($NeededTools.Keys) }
+  $request = It-Request $missing
+  $saved = $true
+  try { Set-Content -Path $ItRequestFile -Value $request -Encoding UTF8 } catch { $saved = $false }
+  Log "WINGET BLOCKED by company policy: $detail; still needed: $($missing -join ', ')"
+  Write-Host ""
+  Write-Host "    Your company's policy blocks Windows Package Manager (winget) on this PC, so this installer"
+  Write-Host "    cannot install $($missing -join ', ')."
+  Write-Host "    Running as administrator will not help: your IT has to allow it. Send them this request:"
+  Write-Host ""
+  foreach ($l in $request) { Write-Host "      $l" }
+  Write-Host ""
+  if ($saved) { Write-Host "    The same request is saved at $ItRequestFile , ready to email as it is." }
+  Write-Host "    When IT has done either option, run this script again. It skips every tool already"
+  Write-Host "    installed, so a PC where IT installed them finishes without winget."
   exit 1
 }
 
@@ -117,9 +239,22 @@ function Fail([string]$why) {
 # console's own handles, so the bar is drawn by winget itself whatever called it. `--silent` hides
 # the package's installer window, not that bar. The Handle read before waiting is the Windows
 # PowerShell 5.1 workaround for an ExitCode that otherwise comes back empty.
-function Invoke-Winget([string[]]$wingetArgs) {
+# -Optional (Claude Code, which has a fallback, and Claude Desktop, which is never fatal): a block
+# returns "blocked" instead of stopping the run.
+function Invoke-Winget([string[]]$wingetArgs, [switch]$Optional) {
+  if (Test-WingetBlocked) { if ($Optional) { return "blocked" }; Stop-WingetBlocked "winget $($wingetArgs -join ' ')" }
   $exe = (Get-Command winget -ErrorAction Stop).Source
-  $p = Start-Process -FilePath $exe -ArgumentList $wingetArgs -NoNewWindow -PassThru
+  try {
+    $p = Start-Process -FilePath $exe -ArgumentList $wingetArgs -NoNewWindow -PassThru
+  } catch {
+    if (Test-AccessDenied $_) {
+      $script:WingetBlocked = $true
+      Log "winget blocked (Start-Process): $($_.Exception.Message)"
+      if ($Optional) { return "blocked" }
+      Stop-WingetBlocked "Start-Process winget: $($_.Exception.Message)"
+    }
+    throw
+  }
   $null = $p.Handle
   $p.WaitForExit()
   return $p.ExitCode
@@ -146,27 +281,35 @@ Log "=== bootstrap.ps1 run started (dry_run=$DryRun) ==="
 # registry first: otherwise a second run reinstalls Claude Code it cannot see (CI, 2026-10-10).
 Refresh-Path
 
-if (-not (Have "winget")) {
-  Fail "winget (the Windows package manager) is missing. Install 'App Installer' from the Microsoft Store, then run this again."
+# Winget is needed only for a tool that is missing. Node, Git and Python have no other way in, so
+# if one of them is missing and winget is blocked, stop here, once, before any install
+# (supersuit-dev#2837). jq is optional and Claude Code has Anthropic's installer as its fallback.
+$missingAtStart = @(Missing-Tools)
+$needWinget = @($missingAtStart | Where-Object { @("node", "git", "python3") -contains $_ })
+Log "missing at start: $($missingAtStart -join ', ')"
+if ($needWinget.Count -gt 0) {
+  if (-not (Have "winget")) {
+    Fail "winget (the Windows package manager) is missing. Install 'App Installer' from the Microsoft Store, then run this again."
+  }
+  if (Test-WingetBlocked) {
+    if ($DryRun) { Write-Host "    [dry-run] company policy blocks winget here; a real run would stop and write the IT request to $ItRequestFile" }
+    else { Stop-WingetBlocked "winget --version, with $($needWinget -join ', ') missing" }
+  }
 }
 
 Step "Node.js and Git (what the harness runs on)" "Git for Windows brings Git Bash, which Claude Code runs Supersuit's hooks through."
 if (Have "node") { Write-Host "    node already installed: $(node --version)" } else { Winget-Install "OpenJS.NodeJS.LTS" "Node.js" }
 if (Have "git") { Write-Host "    git already installed: $(git --version)" } else { Winget-Install "Git.Git" "Git for Windows" }
-if (Have "jq") { Write-Host "    jq already installed" } else { Winget-Install "jqlang.jq" "jq" }
+if (Have "jq") { Write-Host "    jq already installed" } elseif (-not (Have "winget") -or (Test-WingetBlocked)) { Write-Host "    jq skipped: winget is not available here (Supersuit runs without it; it is in the IT request)" } else { Winget-Install "jqlang.jq" "jq" }
 if (-not $DryRun) {
   foreach ($c in @("node", "git")) { if (-not (Have $c)) { Fail "$c did not install (winget finished but '$c' is not on PATH)." } }
 }
+# A company workspace has paths over 260 characters; without this a clone fails "Filename too long" and leaves thousands of files missing.
+if ((-not $DryRun) -and (Have "git")) { git config --global core.longpaths true }
 
-# Freedom's scripts call `python3` by that name: 65 times across the skills, and from node, whose
-# spawn finds only a real .exe by bare name. A stock Windows PC has no python3 at all, or the
-# Microsoft Store stub that opens the Store instead of running (exit 9009). So: Python from winget,
-# then a hard link python3.exe beside python.exe (same folder, so it finds its DLLs), and that
-# folder ahead of WindowsApps in the User PATH so the stub never wins. windows-port, 2026-10-10.
-function Real-Python3 {
-  if (-not (Have "python3")) { return $false }
-  try { $v = & python3 --version 2>&1; return ($LASTEXITCODE -eq 0 -and "$v" -match "^Python 3") } catch { return $false }
-}
+# Python from winget, then a hard link python3.exe beside python.exe (same folder, so it finds its
+# DLLs), and that folder ahead of WindowsApps in the User PATH so the Store stub never wins
+# (Real-Python3 is defined above). windows-port, 2026-10-10.
 Step "Python 3 (what many of Supersuit's scripts run on)" "Python from winget, and a python3 command that is the real thing rather than the Store shortcut."
 if (Real-Python3) {
   Write-Host "    python3 already works: $(python3 --version 2>&1)"
@@ -229,19 +372,19 @@ if (Have "claude") {
   Write-Host "    [dry-run] and only if that fails, Claude Code's official installer (claude.ai/install.ps1)"
 } else {
   $via = $null
-  if (Have "winget") {
+  if ((Have "winget") -and -not (Test-WingetBlocked)) {
     # The biggest download of the run, and the first thing a Windows operator watches (#727): say
     # when it started and what moving looks like, then let winget draw its own bar (Invoke-Winget).
     Write-Host "    installing Claude Code with winget, started $(Get-Date -Format t). The download bar below shows it moving."
     Write-Host "    On a slow connection this can take several minutes. A bar that stops for more than five means check the network."
-    $wingetExit = Invoke-Winget @("install", "--id", "Anthropic.ClaudeCode", "--source", "winget", "-e", "--accept-source-agreements", "--accept-package-agreements", "--silent", "--disable-interactivity")
+    $wingetExit = Invoke-Winget @("install", "--id", "Anthropic.ClaudeCode", "--source", "winget", "-e", "--accept-source-agreements", "--accept-package-agreements", "--silent", "--disable-interactivity") -Optional
     Log "winget install Anthropic.ClaudeCode exited $wingetExit"
     # Non-zero also means "already installed"; what counts is whether claude resolves afterwards.
     Refresh-Path
     if (-not (Have "claude")) { $found = Find-WingetClaude; if ($found) { Add-UserPath $found } }
     if (Have "claude") { $via = "winget" } else { Write-Host "    winget did not leave a working claude (exit $wingetExit); trying Anthropic's installer instead." }
   } else {
-    Write-Host "    winget is not available; using Anthropic's installer instead."
+    Write-Host "    winget is not available here (missing, or blocked by company policy); using Anthropic's installer instead."
   }
   if (-not $via) {
     # It throws on a failed download (the 2026-10-17 lock); catch it so the run ends in Fail's message.
@@ -256,6 +399,7 @@ if (Have "claude") {
     if (Test-Path (Join-Path $localBin "claude.exe")) { Add-UserPath $localBin }
     if (Have "claude") { $via = "Anthropic's installer (claude.ai/install.ps1)" }
   }
+  if (-not $via -and $script:WingetBlocked) { Stop-WingetBlocked "Claude Code: winget blocked and Anthropic's installer left no claude" }
   if (-not $via) { Fail "Claude Code did not install: neither winget nor Anthropic's installer left 'claude' on PATH." }
   Write-Host "    claude installed with $($via): $(claude --version)"
   Log "Claude Code installed via $via"
@@ -289,7 +433,9 @@ if (Have-ClaudeDesktop) {
 } else {
   Write-Host "    installing Claude Desktop with winget, started $(Get-Date -Format t). The download bar below shows it moving."
   $desktopExit = "not run"
-  try { $desktopExit = Invoke-Winget @("install", "--id", "Anthropic.Claude", "--source", "winget", "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity") } catch { $desktopExit = "error: $_" }
+  if (-not (Have "winget")) { $desktopExit = "winget is not available" }
+  else { try { $desktopExit = Invoke-Winget @("install", "--id", "Anthropic.Claude", "--source", "winget", "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity") -Optional } catch { $desktopExit = "error: $_" } }
+  if ($desktopExit -eq "blocked") { $desktopExit = "blocked by company policy" }
   Log "winget install Anthropic.Claude exited $desktopExit"
   if (Have-ClaudeDesktop) {
     Write-Host "    Claude Desktop installed"

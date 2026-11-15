@@ -4,7 +4,7 @@ description: The public version index for Freedom. Every installed workspace pol
 
 # Freedom version index
 
-**Latest version: v8.2.0**
+**Latest version: v8.3.0**
 
 This file is public on purpose, it is deliberately thin, and its FORMAT IS FROZEN.
 
@@ -67,3 +67,4 @@ Newest last.
 ### → v8.0.0 (Supersuit 8.0: one object model and its standards, recordings with voice and video, session names that fit the phone, and waves of fixes)
 ### → v8.1.0 (pointConfigAt refuses a config it cannot parse instead of wiping it, and 414 more changes)
 ### → v8.2.0 (137 changes, the most to send-message and catch-up-pluma)
+### → v8.3.0 (The Helm is now Supertools: a collection of tools that help Pluma help you)
