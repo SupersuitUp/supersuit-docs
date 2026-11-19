@@ -6,6 +6,7 @@
 //   node account-install.mjs --check    say what would happen, change nothing
 //   node account-install.mjs --switch   also move a Mac that gets Supersuit from GitHub today
 //   node account-install.mjs --no-sign-in   stop instead of signing in (the unattended move in an update)
+//   node account-install.mjs --codex    install Supersuit into Codex on a Mac with no Claude Code
 //   node account-install.mjs headers    the marketplace's headersHelper (Claude Code runs this)
 //
 // Design: "Installing Freedom without GitHub" (2026-10-14) and superproject install-without-github,
@@ -27,10 +28,11 @@
 // The token code below repeats supersuit-auth.mjs's idToken on purpose (a third copy, the analytics
 // sender holds the second): this file must run with nothing else on disk. Change the token shape in
 // all three, and run tests/account-install.test.mjs, tests/plugin-headers.test.mjs.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, chmodSync, realpathSync, rmSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, chmodSync, realpathSync, rmSync, readdirSync, lstatSync, readlinkSync, renameSync } from "node:fs";
+import { join, dirname, resolve, sep } from "node:path";
 import { homedir, hostname } from "node:os";
 import { spawnSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 export const MARKETPLACE_URL = "https://app.supersuit.co/api/plugin/marketplace.json";
@@ -129,10 +131,10 @@ export const headerJson = (t) => (typeof t === "string" && TOKEN.test(t) ? JSON.
 
 // ── the token, as supersuit-auth.mjs mints it ──────────────────────────────────────────────────
 
-async function idToken() {
-  const auth = readJson(join(stateDir(), "auth.json"));
+export async function idToken(dir = stateDir()) {
+  const auth = readJson(join(dir, "auth.json"));
   if (!auth?.refreshToken || !auth?.apiKey) return null;
-  const cacheFile = join(stateDir(), "token-cache.json");
+  const cacheFile = join(dir, "token-cache.json");
   const c = readJson(cacheFile);
   if (c?.token && c.exp > Date.now() + 60_000 && c.account === auth.account) return c.token;
   const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${auth.apiKey}`, {
@@ -286,6 +288,117 @@ async function install({ check, switchFromGithub, noSignIn }) {
   return 0;
 }
 
+// ── Codex on a Mac with no Claude Code (supersuit-dev#3458) ────────────────────────────────
+// Codex has no signed-in web marketplace, but it installs from a local folder. The account server
+// already gives a signed-in member each release: a catalog naming a zip and its sha256, and the zip
+// as a 302 to a five-minute signed link (continental-works-web src/lib/plugin-releases.ts). So the
+// release repository stays private, and the member's sign-in is the only thing that opens this path.
+// The folder is the same ~/.supersuit/codex-source a Mac with Claude Code uses (supersuit-codex.mjs).
+
+/** The root plugin's zip in the members' catalog. Refuses anything that is not on the account server. Pure. */
+export function pluginArchive(catalog, portal = PORTAL) {
+  const p = (catalog?.plugins || []).find((x) => x?.name === "supersuit" && x?.source?.source === "archive");
+  if (!p) throw new Error("the catalog from your Supersuit account has no Supersuit release in it");
+  const { url, sha256 } = p.source;
+  if (!/^\d+\.\d+\.\d+$/.test(String(p.version))) throw new Error("the catalog names no usable version");
+  if (!/^[0-9a-f]{64}$/.test(String(sha256))) throw new Error("the catalog gives no usable checksum for the release");
+  let same = false;
+  try { same = new URL(url).origin === new URL(portal).origin; } catch { /* refused below */ }
+  if (!same) throw new Error("the catalog names a release that is not on the account server");
+  return { version: p.version, url, sha256 };
+}
+
+/**
+ * The zip's bytes. The redirect is followed by hand so the sign-in goes to the account server only:
+ * the signed link needs no header, and it belongs to another site.
+ */
+async function downloadZip(url, token, fetchImpl) {
+  const first = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+  let res = first;
+  if (first.status >= 300 && first.status < 400) {
+    const to = first.headers.get("location") || "";
+    if (!to.startsWith("https://")) throw new Error("the account server did not send the release over https");
+    res = await fetchImpl(to, { signal: AbortSignal.timeout(300_000) });
+  }
+  if (!res.ok) throw new Error(`the release download was refused (HTTP ${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/** Throws when a link inside `root` points out of it. A checksum proves the zip; this bounds what it can reach. */
+function refuseLinksOut(root) {
+  const base = realpathSync(root);
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      const f = join(d, name), st = lstatSync(f);
+      if (st.isDirectory()) walk(f);
+      else if (st.isSymbolicLink()) {
+        const to = resolve(dirname(f), readlinkSync(f));
+        if (to !== base && !to.startsWith(base + sep)) throw new Error("the release holds a link to a place outside its own folder");
+      }
+    }
+  };
+  walk(base);
+}
+
+/**
+ * Put the newest release in ~/.supersuit/codex-source. The folder changes only after the checksum,
+ * the manifest version and the marketplace file all pass. -> { dir, version, changed }.
+ */
+export async function installCodexSource({ home: h = home(), token, portal = PORTAL, fetchImpl = fetch, run = spawnSync, platform = process.platform } = {}) {
+  if (platform === "win32") throw new Error("this install path is for a Mac");
+  if (!token) throw new Error("not signed in to Supersuit");
+  const r = await fetchImpl(`${portal}/api/plugin/marketplace.json`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) });
+  if (!r.ok) throw new Error(`your Supersuit account could not read the release catalog (HTTP ${r.status})`);
+  const { version, url, sha256 } = pluginArchive(await r.json(), portal);
+  const dir = join(h, ".supersuit", "codex-source");
+  let have = null;
+  try { have = readFileSync(join(dir, ".source-version"), "utf8").trim(); } catch { /* no copy yet */ }
+  if (have === version && existsSync(join(dir, ".claude-plugin", "marketplace.json"))) return { dir, version, changed: false };
+
+  const zip = await downloadZip(url, token, fetchImpl);
+  if (createHash("sha256").update(zip).digest("hex") !== sha256) throw new Error("the download does not match the release's checksum, so nothing was changed");
+  mkdirSync(dirname(dir), { recursive: true });
+  const tmp = `${dir}.new-${process.pid}`, zipFile = `${dir}.zip-${process.pid}`;
+  try {
+    rmSync(tmp, { recursive: true, force: true });
+    mkdirSync(tmp);
+    writeFileSync(zipFile, zip, { mode: 0o600 });
+    const x = run("unzip", ["-q", zipFile, "-d", tmp], { stdio: "ignore", timeout: 300_000 });
+    if (x.error || x.status !== 0) throw new Error("the release could not be unpacked");
+    refuseLinksOut(tmp);
+    if (!existsSync(join(tmp, ".claude-plugin", "marketplace.json"))) throw new Error("the release has no marketplace file for Codex to read");
+    const inZip = readJson(join(tmp, ".claude-plugin", "plugin.json"))?.version;
+    if (inZip !== version) throw new Error(`the release says it is ${inZip}, and the catalog says ${version}`);
+    writeFileSync(join(tmp, ".source-version"), `${version}\n`);
+    rmSync(dir, { recursive: true, force: true });
+    renameSync(tmp, dir);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(zipFile, { force: true });
+  }
+  return { dir, version, changed: true };
+}
+
+/** `--codex`: sign in if needed, fetch the release, then let that release install itself into Codex. */
+async function installIntoCodex({ check, noSignIn }) {
+  if (check) { say("would sign in if needed, download the release from your Supersuit account and install it into Codex"); return 0; }
+  if (!readJson(join(stateDir(), "auth.json"))?.refreshToken) {
+    if (noSignIn) throw new Error("not signed in to Supersuit; nothing was changed");
+    say(`Signed in as ${await signIn()}`);
+  } else say("Already signed in to Supersuit");
+  const token = await idToken();
+  if (!token) throw new Error("this computer's Supersuit sign-in did not give a token; sign in again (delete ~/.supersuit/auth.json, then run this again)");
+  const { dir, version } = await installCodexSource({ token });
+  say(`Supersuit ${version} downloaded and its checksum matched`);
+  const r = spawnSync(process.execPath, [join(dir, ".agents", "lib", "supersuit-codex.mjs"), "install", "--source", dir, "--cwd", home()],
+    { encoding: "utf8", timeout: 300_000 });
+  if (r.status !== 0) throw new Error(`Codex did not take the install: ${String(r.stderr || r.stdout || r.error?.message).trim().split("\n").pop()}`);
+  // Codex runs no Claude Code hook here, so the skills' resolver is put in place now, as install() does.
+  if (!primeResolver(dir)) say("Supersuit's skill runner is not in place yet; it arrives with the first Codex session");
+  say(`Supersuit ${version} is in Codex. Quit Codex, open it again, start a new chat, and run $supersuit:activate-or-update-supersuit.`);
+  return 0;
+}
+
 // Inline, not supersuit-is-main.mjs: a fresh Mac downloads this file alone (see the header), so it
 // cannot import the helper. Same rule restated, the eval check included (#1033): under `node -e`
 // argv[1] is the first extra argument, which can be this file's own path, and nothing is main.
@@ -308,7 +421,9 @@ if (isMain) {
     process.exitCode = line ? 0 : 1;
   } else {
     try {
-      process.exitCode = await install({ check: args.includes("--check"), switchFromGithub: args.includes("--switch"), noSignIn: args.includes("--no-sign-in") });
+      process.exitCode = args.includes("--codex")
+        ? await installIntoCodex({ check: args.includes("--check"), noSignIn: args.includes("--no-sign-in") })
+        : await install({ check: args.includes("--check"), switchFromGithub: args.includes("--switch"), noSignIn: args.includes("--no-sign-in") });
     } catch (e) {
       say(`Stopped: ${e.message}`);
       process.exitCode = 1;

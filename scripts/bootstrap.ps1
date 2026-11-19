@@ -24,15 +24,19 @@ param([switch]$DryRun, [switch]$NoLaunch, [switch]$PrintHandoff)
 
 $ErrorActionPreference = "Stop"
 
-$InstallSkillUrl = if ($env:FREEDOM_INSTALL_SKILL_URL) { $env:FREEDOM_INSTALL_SKILL_URL } else { "https://wiki.supersuit.co/skills/install-freedom-windows/SKILL.md" }
+# SUPERSUIT_INSTALL_SKILL_URL first (supersuit-dev#3353); the old FREEDOM_ name still works for one release,
+# for setup pages and installers already out. Remove the second half after 8.6.
+$InstallSkillOverride = if ($env:SUPERSUIT_INSTALL_SKILL_URL) { $env:SUPERSUIT_INSTALL_SKILL_URL } else { $env:FREEDOM_INSTALL_SKILL_URL }
+$InstallSkillUrl = if ($InstallSkillOverride) { $InstallSkillOverride } else { "https://wiki.supersuit.co/skills/install-supersuit-windows/SKILL.md" }
+# The wiki serves this path itself, 200 with no redirect (checked 2026-11-18, supersuit-dev#3353).
 # Never a URL that redirects: Windows PowerShell 5.1's Invoke-WebRequest does not follow a 308 (curl
 # on the Mac does; measured 2026-10-10). On 2026-10-17 getfreedom.wiki began answering 308 to
 # wiki.supersuit.co and every Windows install died here, so the default is the host that serves the
 # file, the old URL is a fallback, and a Location header on any failure is followed by hand.
 $InstallSkillUrls = @($InstallSkillUrl)
-if (-not $env:FREEDOM_INSTALL_SKILL_URL) { $InstallSkillUrls += "https://www.getfreedom.wiki/skills/install-freedom-windows/SKILL.md" }
+if (-not $InstallSkillOverride) { $InstallSkillUrls += "https://www.getfreedom.wiki/skills/install-freedom-windows/SKILL.md" }
 $InstallSkillFile = Join-Path $HOME ".supersuit-install.md"
-$LogFile = Join-Path $HOME ".freedom-setup.log"
+$LogFile = Join-Path $HOME ".supersuit-setup.log"
 
 function Log([string]$line) {
   try { Add-Content -Path $LogFile -Value ("{0} {1}" -f (Get-Date -Format s), $line) } catch { }
@@ -55,7 +59,7 @@ function Supersuit-Config {
   return (Join-Path $dir "config.json")
 }
 
-function Freedom-Mode {
+function Supersuit-Mode {
   $m = $env:FREEDOM_PERMISSION_MODE
   if (-not $m) {
     $cfg = Supersuit-Config
@@ -70,7 +74,7 @@ function Freedom-Mode {
 
 # The same words bootstrap.sh hands over, so both installs open the same conversation.
 $HandoffPrompt = "Read $InstallSkillFile and follow it exactly. It is the Supersuit install skill. It is run TOGETHER with the person who invited them, who should be on a call or in the room; the skill's first section asks, and if they are not, you stop there and say so, running nothing."
-function Handoff-Command { return ('claude --permission-mode {0} "{1}"' -f (Freedom-Mode), $HandoffPrompt) }
+function Handoff-Command { return ('claude --permission-mode {0} "{1}"' -f (Supersuit-Mode), $HandoffPrompt) }
 
 if ($PrintHandoff) { Handoff-Command; exit 0 }
 
@@ -355,15 +359,35 @@ function Find-WingetClaude {
   return $null
 }
 # Put a folder on the User PATH (persisted, so a new window finds it) and on this session's.
-function Add-UserPath([string]$dir) {
+function Add-UserPath([string]$dir, [string]$what = "claude") {
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   if (($userPath -split ";") -notcontains $dir) {
     [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(";") + ";" + $dir).TrimStart(";")), "User")
-    Write-Host "    added $dir to your PATH so new windows find claude"
+    Write-Host "    added $dir to your PATH so new windows find $what"
     Log "added $dir to User PATH"
   }
   Refresh-Path
 }
+# Git's bin folder on the User PATH (supersuit-dev#2240): Git for Windows adds only Git\cmd, so `bash` from PowerShell
+# or Codex said "not recognized". bin holds git, bash and sh and nothing else, so it shadows nothing. The User PATH
+# comes after the Machine PATH: where System32\bash.exe (the WSL launcher) exists it still answers first, and only an
+# admin could change that, so Supersuit's own commands never rely on the word (.agents/bin/git-bash-command.cmd).
+function Find-GitBin {
+  $git = Get-Command git -ErrorAction SilentlyContinue
+  if (-not $git) { return $null }
+  $dir = Split-Path $git.Source -Parent
+  foreach ($i in 1..3) {
+    if (-not $dir) { return $null }
+    if (Test-Path (Join-Path $dir "bin\bash.exe")) { return (Join-Path $dir "bin") }
+    $dir = Split-Path $dir -Parent
+  }
+  return $null
+}
+if (-not $DryRun) {
+  $gitBin = Find-GitBin
+  if ($gitBin) { Add-UserPath $gitBin "bash" } else { Log "no bash.exe found near git; PATH left alone" }
+}
+
 Step "Claude Code (the agent)" "the agent that does the rest of the setup, installed with winget (Anthropic's own Windows installer only if winget cannot)."
 if (Have "claude") {
   Write-Host "    claude already installed: $(claude --version)"
@@ -449,7 +473,7 @@ if (Have-ClaudeDesktop) {
 
 Step "The install skill" "the written instructions the agent follows for the rest of the setup: one text file at $InstallSkillFile."
 if ($DryRun) {
-  Write-Host "    [dry-run] would fetch $InstallSkillUrl"
+  Write-Host "    [dry-run] would fetch the install skill"
 } else {
   $fetched = $null; $lastError = ""
   foreach ($u in $InstallSkillUrls) {
@@ -468,7 +492,8 @@ if ($DryRun) {
   if (-not $fetched) { Fail "could not fetch the install skill from $($InstallSkillUrls -join ' or ') ($lastError)" }
   $InstallSkillUrl = $fetched
   $head = (Get-Content $InstallSkillFile -TotalCount 20) -join "`n"
-  if ($head -notmatch "install-freedom") {
+  # Either name: the file served at the new path still calls itself install-freedom-windows (supersuit-dev#3353).
+  if ($head -notmatch "install-(freedom|supersuit)") {
     Remove-Item $InstallSkillFile -ErrorAction SilentlyContinue
     Fail "the URL returned something that is not the install skill: $InstallSkillUrl"
   }
@@ -499,4 +524,4 @@ if ($NoLaunch -or $DryRun) {
   Write-Host "    $(Handoff-Command)"
   exit 0
 }
-& claude --permission-mode (Freedom-Mode) $HandoffPrompt
+& claude --permission-mode (Supersuit-Mode) $HandoffPrompt
