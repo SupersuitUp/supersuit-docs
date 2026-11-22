@@ -159,9 +159,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The daily update runs from launchd with a short PATH, so it names the binary it found.
 const claudeBin = () => process.env.FREEDOM_CLAUDE_BIN || "claude";
+// The rule of .agents/lib/supersuit-claude-command.mjs, inlined because this file runs downloaded on its own and imports
+// only node's modules: on Windows a node-script stand-in (.mjs/.js/.cjs) runs as this node with the script first.
+const claudeCommand = (bin, args = []) => (process.platform === "win32" && /\.(m|c)?js$/i.test(String(bin))
+  ? { cmd: process.execPath, args: [bin, ...args] } : { cmd: bin, args: [...args] });
 
 function claude(args, opts = {}) {
-  const r = spawnSync(claudeBin(), args, { encoding: "utf8", timeout: 300_000, ...opts });
+  const c = claudeCommand(claudeBin(), args);
+  const r = spawnSync(c.cmd, c.args, { encoding: "utf8", timeout: 300_000, ...opts });
   return { code: r.error ? 127 : r.status, out: `${r.stdout || ""}${r.stderr || ""}` };
 }
 
@@ -207,7 +212,8 @@ function stableNode() {
 
 /** Start one session so Claude Code registers the declared marketplace. It may say "Not logged in"; that is fine. */
 async function registerDeclared() {
-  const child = spawn(claudeBin(), ["-p", "reply ok"], { stdio: "ignore",
+  const c = claudeCommand(claudeBin(), ["-p", "reply ok"]);
+  const child = spawn(c.cmd, c.args, { stdio: "ignore",
     // FREEDOM_AUTO_UPDATE=off: this session loads the Supersuit hooks, and an update it started would
     // run this move again from inside the move.
     env: { ...process.env, CLAUDE_CODE_SYNC_PLUGIN_INSTALL: "1", FREEDOM_AUTO_UPDATE: "off" } });
