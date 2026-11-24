@@ -4,7 +4,7 @@ description: The public version index for Freedom. Every installed workspace pol
 
 # Freedom version index
 
-**Latest version: v8.9.0**
+**Latest version: v8.10.0**
 
 This file is public on purpose, it is deliberately thin, and its FORMAT IS FROZEN.
 
@@ -75,3 +75,4 @@ Newest last.
 ### → v8.7.0 (104 changes, the most to Misses and send-message)
 ### → v8.8.0 (141 changes, the most to create-or-update-an-automation and catch-up-pluma)
 ### → v8.9.0 (116 changes, the most to catch-up-pluma and catch-up)
+### → v8.10.0 (388 changes, the most to S2S and Company experiments)
