@@ -47,7 +47,12 @@ set -uo pipefail
 # be fixed without cutting a template release. It is public and needs no auth,
 # which is what keeps the private-repo GitHub login on the agent's side of the
 # boundary instead of dragging it back into this script.
-INSTALL_SKILL_URL="${FREEDOM_INSTALL_SKILL_URL:-https://getfreedom.wiki/skills/install-freedom/SKILL.md}"
+#
+# SUPERSUIT_INSTALL_SKILL_URL first (supersuit-dev#3353). The old FREEDOM_ name stays an alias for good:
+# a member's saved command or setup page must not break. bootstrap.ps1 reads the two the same way.
+# The default is the host that serves the file; getfreedom.wiki only redirects there (checked 2026-11-26).
+# The path keeps the old skill name until the wiki serves install-supersuit (it answered 404 that day).
+INSTALL_SKILL_URL="${SUPERSUIT_INSTALL_SKILL_URL:-${FREEDOM_INSTALL_SKILL_URL:-https://wiki.supersuit.co/skills/install-freedom/SKILL.md}}"
 INSTALL_SKILL_FILE="$HOME/.supersuit-install.md"
 
 LOG_FILE="$HOME/.freedom-setup.log"

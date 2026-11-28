@@ -4,7 +4,7 @@ description: The public version index for Freedom. Every installed workspace pol
 
 # Freedom version index
 
-**Latest version: v8.10.0**
+**Latest version: v9.0.0**
 
 This file is public on purpose, it is deliberately thin, and its FORMAT IS FROZEN.
 
@@ -52,18 +52,6 @@ Not a client yet: https://github.com/ContinentalWorks/freedom
 ## Versions
 
 Newest last.
-### → v7.0.0 (Supersuit is Supersuit everywhere: the Freedom name and plugin are retired, and your update moves you to the supersuit marketplace)
-### → v7.1.0 (Marketplace move on a preview Mac: add the clone through the other state-folder spelling, and 12 more changes)
-### → v7.2.0 (notify: "text me" can ask for a text, and a Helm push carries the words, and 311 more changes)
-### → v7.3.0 (Recommended reads clearly, and sixteen fixes from operator reports)
-### → v7.4.0 (Reconcile card: per-item choices as data, and holds filed under a symlinked workspace name answer again, and 148 more changes)
-### → v7.5.0 (end-a-session: a background job started from a bg-spare can end itself (#1499), and 71 more changes)
-### → v7.6.0 (enterprise guard: tell the company's owners, and guard documents, transcripts, people and Bash copies, and 77 more changes)
-### → v7.7.0 (artifact hub: deploy the host that ships in @supersuit/artifacts when --hub-source is not given, and 87 more changes)
-### → v7.8.0 (update-surfaces test: start surface spawns in the throwaway HOME, and 122 more changes)
-### → v7.9.0 (organizations: filing the operator's own superproject makes their company record; audit scopes to one company, and 89 more changes)
-### → v7.10.0 (Question kinds: seven kinds, one name each, in one table, and 113 more changes)
-### → v7.11.0 (Take it off my plate: the owner of a company superproject can close it, and 186 more changes)
 ### → v8.0.0 (Supersuit 8.0: one object model and its standards, recordings with voice and video, session names that fit the phone, and waves of fixes)
 ### → v8.1.0 (pointConfigAt refuses a config it cannot parse instead of wiping it, and 414 more changes)
 ### → v8.2.0 (137 changes, the most to send-message and catch-up-pluma)
@@ -76,3 +64,4 @@ Newest last.
 ### → v8.8.0 (141 changes, the most to create-or-update-an-automation and catch-up-pluma)
 ### → v8.9.0 (116 changes, the most to catch-up-pluma and catch-up)
 ### → v8.10.0 (388 changes, the most to S2S and Company experiments)
+### → v9.0.0 (Supertools overhaul: faster, with your projects, what is next for each, your team, and what each supersession is doing for you)

@@ -24,8 +24,8 @@ param([switch]$DryRun, [switch]$NoLaunch, [switch]$PrintHandoff)
 
 $ErrorActionPreference = "Stop"
 
-# SUPERSUIT_INSTALL_SKILL_URL first (supersuit-dev#3353); the old FREEDOM_ name still works for one release,
-# for setup pages and installers already out. Remove the second half after 8.6.
+# SUPERSUIT_INSTALL_SKILL_URL first (supersuit-dev#3353). The old FREEDOM_ name stays an alias for good:
+# a member's saved command or setup page must not break. bootstrap.sh reads the two the same way.
 $InstallSkillOverride = if ($env:SUPERSUIT_INSTALL_SKILL_URL) { $env:SUPERSUIT_INSTALL_SKILL_URL } else { $env:FREEDOM_INSTALL_SKILL_URL }
 $InstallSkillUrl = if ($InstallSkillOverride) { $InstallSkillOverride } else { "https://wiki.supersuit.co/skills/install-supersuit-windows/SKILL.md" }
 # The wiki serves this path itself, 200 with no redirect (checked 2026-11-18, supersuit-dev#3353).
